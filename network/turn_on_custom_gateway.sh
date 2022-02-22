@@ -23,13 +23,13 @@ count_routes () {
 }
 
 add_iptables () {
-	if [ ! `iptables -S POSTROUTUNG -t nat | grep ${1}` ]; then
+	if ! iptables -S POSTROUTING -t nat | grep ${1} > /dev/null; then
 		iptables -t nat -A POSTROUTING -o ${1} -j MASQUERADE
 	fi
-	if [ ! `iptables -S FORWARD | grep -E '\-A[ ]FORWARD[ ]\-m[ ]conntrack[ ]\-\-ctstate[ ]RELATED\,ESTABLISHED[ ]\-j[ ]ACCEPT'` ]; then
+	if ! iptables -S FORWARD | grep -E '\-A[ ]FORWARD[ ]\-m[ ]conntrack[ ]\-\-ctstate[ ]RELATED\,ESTABLISHED[ ]\-j[ ]ACCEPT' > /dev/null; then
 		iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 	fi
-	if [ ! `iptables -S FORWARD | grep ${1}` ]; then
+	if ! iptables -S FORWARD | grep ${1} > /dev/null; then
 		iptables -A FORWARD -i ${2} -o ${1} -j ACCEPT
 	fi
 }
@@ -43,17 +43,56 @@ turn_on_gateway () {
 
 	add_iptables $1 $2
 	echo "ADD NAT TO IPTABLES"
-
 }
+
+cleanup () {
+	if iptables -S POSTROUTING -t nat | grep $1 > /dev/null; then
+		echo 'CLEANUP iptables -A POSTROUTING -t nat' $1 '-j MASQUERADE'
+		iptables -D POSTROUTING -t nat -o $1 -j MASQUERADE
+	else
+		echo 'NOTHING TO CLEANUP'
+	fi
+	if iptables -S FORWARD | grep -E '\-A[ ]FORWARD[ ]\-m[ ]conntrack[ ]\-\-ctstate[ ]RELATED\,ESTABLISHED[ ]\-j[ ]ACCEPT' > /dev/null; then
+		echo 'CLEANUP iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
+		iptables -D FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+	else
+		echo 'NOTHING TO CLEANUP'
+	fi
+	if iptables -S FORWARD | grep $1 > /dev/null; then
+		echo 'CLEANUP iptables -D FORWARD -i' $2 '-o' $1 '-j ACCEPT'
+		iptables -D FORWARD -i $2 -o $1 -j ACCEPT
+	else
+		echo 'NOTHING TO CLEANUP'
+	fi
+}
+
+check_state () {
+	if [ -f /sys/class/net/$1/carrier ] && [ -f /sys/class/net/$1/operstate ] && [ `grep "1" /sys/class/net/${1}/carrier` ] && [ `grep -E '(up)|(unknown)' /sys/class/net/${1}/operstate` ]; then
+		echo 'connected'
+	else
+		echo 'disconnected'
+	fi
+}
+
+STATE=''
+OLD_STATE='disconnected'
 
 while true; do
 	sleep $SLEEP_LOOP
+	STATE=`check_state ${INTERFACE_IN}`
 
-	if [ -f /sys/class/net/$INTERFACE_IN/carrier ] && [ -f /sys/class/net/$INTERFACE_IN/operstate ] && [ `grep "1" /sys/class/net/$INTERFACE_IN/carrier` ] && [ `grep -E '(up)|(unknown)' /sys/class/net/$INTERFACE_IN/operstate` ]; then
+	if [ "$STATE" = "$OLD_STATE" ]; then
+		continue
+	else
+		OLD_STATE=$STATE
+	fi
+
+	if [ "$STATE" = 'connected' ]; then
 		echo "CONNECTED"
 		sleep $SLEEP_INIT_WAIT
 	else
 		echo "DISCONNECTED"
+		cleanup $INTERFACE_IN $INTERFACE_OUT
 		continue
 	fi
 
