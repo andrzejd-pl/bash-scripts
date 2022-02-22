@@ -1,0 +1,9 @@
+[Unit]
+Description=custom gateway service
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/turn_on_custom_gateway.sh
+
+[Install]
+WantedBy=multi-user.target
